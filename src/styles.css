@@ -462,3 +462,4 @@ tbody tr:hover { background: var(--accent-subtle); }
 .pager-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 720px) { .pager-bar span { display: none; } .kpi-mini small { font-size: 11px; } }
 @media (max-width: 720px) { .kpi-mini .score-ring { display: none; } }
+.panel-head select { width: auto; min-width: 170px; }
