@@ -198,7 +198,7 @@ function PendingFile({ p, hasData, onChange, onCancel, onCommit, onEnrich }: { p
         <strong className="good-text">{v!.incidents.length.toLocaleString()} pages ready</strong> of {v!.total.toLocaleString()} rows
         {v!.skipped > 0 && <>, <strong className="error">{v!.skipped} skipped</strong></>}
         {v!.issues.length > errors.length && <>, {v!.issues.length - errors.length} warnings</>}.
-        {v!.incidents.length > 0 && <> People found: {new Set(v!.incidents.map(i => i.person)).size}. Range {new Date(Math.min(...v!.incidents.map(i => i.created))).toISOString().slice(0, 10)} to {new Date(Math.max(...v!.incidents.map(i => i.created))).toISOString().slice(0, 10)}.</>}
+        {v!.incidents.length > 0 && <> People found: {new Set(v!.incidents.map(i => i.person)).size}. Range {new Date(v!.incidents.reduce((m, i) => Math.min(m, i.created), Infinity)).toISOString().slice(0, 10)} to {new Date(v!.incidents.reduce((m, i) => Math.max(m, i.created), 0)).toISOString().slice(0, 10)}.</>}
       </p>
       {v!.issues.length > 0 && (
         <div className="issues" role="log" aria-label="Validation issues">

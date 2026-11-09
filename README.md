@@ -1,32 +1,33 @@
-# Chargeback
+# On-call Health
 
-Snowflake cost attribution that assigns every credit to a team, idle time included.
+Shows an engineering manager how hard on-call is hitting each person, and which alerts to fix first. Built for the quarterly on-call review.
 
-**Live:** https://chargeback-lab.vercel.app
+**Live:** https://oncall-health.vercel.app
 
 ## The pain
 
-`QUERY_ATTRIBUTION_HISTORY` charges each query for its own execution and leaves warehouse idle time out. After teams consolidate warehouses, part of the bill belongs to nobody, and "one warehouse, two teams, who pays?" has no written answer. The usual fix is query tags plus a rule for idle time. Chargeback is that rule, tested, with the statements and CSV finance asks for.
+Pages arrive through several tools at all hours, a lot of them are flapping, duplicated or resolve on their own, and one person quietly absorbs the swaps and weekends. Nobody has the numbers to argue for change.
 
-## What it does
+## Features
 
-- **Docs with copy-paste SQL** against `SNOWFLAKE.ACCOUNT_USAGE` (warehouse metering, query attribution joined to query history, daily metering, `SHOW WAREHOUSES`), with each view's latency and required database role.
-- **Guided import**: drop CSVs, the export type is detected from its columns, columns are mapped automatically and can be re-mapped, and every rejected row is reported with its line number. Re-importing a month replaces just that month.
-- **Ordered team-mapping rules** on query tag (including JSON keys), role, user, warehouse, database or serverless service, with a test-a-row panel and a loud "fix these first" list of unmapped spend.
-- **Allocation engine** (plain TypeScript, 38 tests): hourly metered compute minus attributed query credits is idle; idle is split proportional to query credits, to execution time, evenly among active teams, or to the warehouse owner. Pure-idle hours follow the last active hour (auto-suspend tail). Cloud services get the daily 10% adjustment; serverless and query acceleration are mapped too. Totals reconcile to the metered bill and the residual is explained.
-- **Outputs**: printable per-team statements (one page per team), finance CSV, budgets with burn-down and month-end forecast, day-over-day spike list with drivers, idle-waste ranking, `ALTER WAREHOUSE` recommendations with estimated savings and stated assumptions, query-tag adoption score and `ALTER USER ... SET QUERY_TAG` SQL.
-- **Workspace**: multiple projects in IndexedDB, monthly snapshots and a month-over-month compare that explains which team grew and why.
-- **Optional accounts** (email + password) sync projects, rules and snapshots across devices; everything works signed out.
-- Two synthetic sample accounts, clearly labelled.
+- **Import** PagerDuty incidents CSV and REST API (`/incidents` plus `/log_entries`), Opsgenie alerts CSV, Rootly CSV or JSON:API, or any CSV. Format detection, column mapping and a validation report with line numbers.
+- **Per-person load** in each person's timezone and working hours: business hours, evenings, sleep hours (default 22:00 to 07:00) and weekends, plus a 7 x 24 heatmap.
+- **Ack and resolve distributions**, **fairness** (Gini and share against a fair share) and a **documented burnout-risk score**.
+- **Noise detection**: auto-resolved blips, flapping, duplicates, dependencies, never-acked and non-actionable alerts, ranked with a concrete change and the pages per month it removes. Toggle any fix as a what-if.
+- **Rotation simulator** (single, primary/secondary, follow-the-sun), **pay and time off in lieu** with an editable policy, a **printable quarterly report** and CSVs.
+- **History**: quarterly or monthly snapshots with a compare view.
+- Local-first (IndexedDB). Optional email sign-in syncs teams across devices.
+- Three synthetic sample teams.
 
 ## Run locally
 
-```bash
+```sh
 npm install
-cp .env.example .env   # optional: Supabase URL + publishable key for sync
-npm run dev
-npm test
+npm run dev     # http://localhost:5173
+npm test        # engine tests
 npm run build
 ```
 
-Independent project, not affiliated with Snowflake.
+Cloud sync needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env` (see `.env.example`). Without them the app runs in local-only mode.
+
+Built by Aryan Kansagara. Independent project, not affiliated with Rootly.

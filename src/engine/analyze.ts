@@ -333,7 +333,7 @@ export function detectFixes(incidents: Incident[], cfg: Config, span?: { days: n
     }
     const dep = deps.get(key)
     if (dep && dep.hits.length >= Math.max(3, n * 0.6)) {
-      add('dependency', key, list, dep.hits, `${dep.hits.length} of ${n} pages (${pct(dep.hits.length, n)}) fired within 10 min after "${dep.other.split(' :: ')[1]}" on ${dep.other.split(' :: ')[0]}.`,
+      add('dependency', key, list, dep.hits, `${dep.hits.length} of ${n} pages (${pct(dep.hits.length, n)}) fired within 10 min after "${groups.get(dep.other)?.[0].title ?? dep.other.split(' :: ')[1]}" on ${dep.other.split(' :: ')[0]}.`,
         `Make this alert depend on ${dep.other.split(' :: ')[0]}: suppress it while the upstream alert is open, so one root cause pages once.`,
         'PagerDuty: Service dependencies + Event Orchestration condition on the upstream incident. Opsgenie: alert policy with a dependency tag. Alertmanager: inhibit_rules.')
     }
@@ -500,7 +500,7 @@ export function slicePeriod(incidents: Incident[], period: string): { incidents:
   const [a, b] = periodBounds(period)
   const list = incidents.filter(i => i.created >= a && i.created < b)
   // A period still in progress is measured to its last page, not to its calendar end.
-  const end = Math.min(b, Math.max(a + 7 * DAY, ...list.map(i => i.created + 1)))
+  const end = Math.min(b, list.reduce((m, i) => Math.max(m, i.created + 1), a + 7 * DAY))
   return { incidents: list, days: (end - a) / DAY }
 }
 

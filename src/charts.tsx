@@ -41,7 +41,7 @@ export const HeatLegend = () => (
 export function BucketBar({ buckets, total }: { buckets: Record<Bucket, number>; total?: number }) {
   const t = total ?? BUCKETS.reduce((a, b) => a + buckets[b], 0)
   return (
-    <div className="stack" role="img" aria-label={BUCKETS.map(b => `${BUCKET_LABEL[b]} ${buckets[b]}`).join(', ')}>
+    <div className="bbar" role="img" aria-label={BUCKETS.map(b => `${BUCKET_LABEL[b]} ${buckets[b]}`).join(', ')}>
       {t > 0 && BUCKETS.map(b => <span key={b} style={{ width: `${buckets[b] / t * 100}%`, background: bucketColor(b) }} />)}
     </div>
   )

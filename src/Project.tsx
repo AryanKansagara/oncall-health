@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { snapshot } from './engine/analyze.ts'
 import type { Config, Incident } from './engine/types.ts'
-import { periodOptions, useAnalysis, useProject, withPeople } from './projectData.ts'
+import { defaultPeriod, periodOptions, useAnalysis, useProject, withPeople } from './projectData.ts'
 import { uuid, type Project } from './store.ts'
 import { Empty, fmtPeriod, go, isTyping, Link, Modal, SyntheticBadge, toast } from './ui.tsx'
 
@@ -21,23 +21,24 @@ export interface TabProps {
   update(p: Partial<Project>): void
 }
 
-export const periodFromUrl = (opts: string[]) => {
+export const periodFromUrl = (opts: string[], def: string) => {
   const q = new URLSearchParams(location.search).get('p')
-  return q && opts.includes(q) ? q : opts[1] ?? 'all'
+  return q && opts.includes(q) ? q : def
 }
 
 export default function ProjectView({ id, tab: rawTab }: { id: string; tab: string }) {
   const { loading, project, ds, setConfig, update } = useProject(id)
   const tab = (TABS.some(t => t[0] === rawTab) ? rawTab : 'overview') as Tab
   const opts = useMemo(() => periodOptions(ds), [ds])
-  const period = periodFromUrl(opts)
+  const def = useMemo(() => defaultPeriod(ds, opts), [ds, opts])
+  const period = periodFromUrl(opts, def)
   const cfg = useMemo(() => project && ds ? withPeople(project.config, ds) : null, [project?.config, ds])
   const a = useAnalysis(ds, cfg ?? undefined, period)
   const [help, setHelp] = useState(false)
 
   useEffect(() => { if (project) document.title = `${project.name} · On-call Health` }, [project?.name])
 
-  const q = period === opts[1] ? '' : `?p=${period}`
+  const q = period === def ? '' : `?p=${period}`
   const setTab = (t: Tab) => go(`/app/p/${id}${t === 'overview' ? '' : '/' + t}${q}`, { keepScroll: true })
   const setPeriod = (p: string) => go(`${location.pathname}?p=${p}`, { replace: true, keepScroll: true })
 

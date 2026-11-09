@@ -4,13 +4,14 @@ import { toCsv } from './engine/csv.ts'
 import { BUCKETS } from './engine/types.ts'
 import { BucketBar, BucketLegend, BUCKET_LABEL } from './charts.tsx'
 import { periodFromUrl } from './Project.tsx'
-import { periodOptions, useAnalysis, useProject, withPeople } from './projectData.ts'
+import { defaultPeriod, periodOptions, useAnalysis, useProject, withPeople } from './projectData.ts'
 import { download, fmtMin, fmtMoney, fmtN, fmtPct, fmtPeriod, Link, signed, SyntheticBadge } from './ui.tsx'
 
 export default function Report({ id }: { id: string }) {
   const { loading, project, ds } = useProject(id)
   const opts = useMemo(() => periodOptions(ds), [ds])
-  const period = periodFromUrl(opts)
+  const def = useMemo(() => defaultPeriod(ds, opts), [ds, opts])
+  const period = periodFromUrl(opts, def)
   const cfg = useMemo(() => project && ds ? withPeople(project.config, ds) : null, [project?.config, ds])
   const a = useAnalysis(ds, cfg ?? undefined, period)
   useEffect(() => { if (project) document.title = `On-call health review · ${project.name} · ${fmtPeriod(period)}` }, [project?.name, period])

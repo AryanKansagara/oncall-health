@@ -74,6 +74,14 @@ export function useAnalysis(ds: Incident[] | null, cfg: Config | undefined, peri
   }, [ds, cfg, period])
 }
 
+/** Latest quarter the data fully covers (within a week of its end), else the latest period with data. */
+export function defaultPeriod(ds: Incident[] | null, opts: string[]): string {
+  if (!ds?.length) return 'all'
+  const last = ds.reduce((m, i) => Math.max(m, i.created), 0)
+  const q = opts.find(p => /Q/.test(p) && Date.UTC(+p.slice(0, 4), +p.slice(-1) * 3, 1) - last < 7 * 86400000)
+  return q ?? opts[1] ?? 'all'
+}
+
 export const periodOptions = (ds: Incident[] | null) => ds?.length ? ['all', ...periods(ds, 'quarter').reverse(), ...periods(ds, 'month').reverse()] : ['all']
 
 export function defaultRota(cfg: Config, list: Incident[]): RotaInput {
