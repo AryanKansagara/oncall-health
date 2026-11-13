@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { alertKey, analyze, applyFixes, bucketOf, burnoutScore, compensation, detectFixes, escalationRate, gini, histogram, isoWeek, local, longestRun, nightOf, normalizeTitle, percentile, periods, simulateRota, slicePeriod, snapshot } from './analyze.ts'
-import { applyLogEntries, autoMap, detectCsvFormat, incidentsToCsv, mergeIncidents, parseCsv, parseJson, parseTime, toUrgency, validate } from './csv.ts'
+import { applyLogEntries, autoMap, detectCsvFormat, incidentsToCsv, mergeIncidents, naiveToUtc, parseCsv, parseJson, parseTime, toUrgency, validate } from './csv.ts'
 import { DEFAULT_POLICY, generate, SAMPLES, sampleConfig } from './sample.ts'
 import type { Config, Incident } from './types.ts'
 
@@ -315,4 +315,85 @@ test('merging by id and CSV export round-trip', () => {
   const csv = parseCsv(incidentsToCsv(m))
   const v = validate(csv, autoMap(csv.rows[0]))
   assert.deepEqual(v.incidents.map(i => [i.id, i.created, i.title]), m.map(i => [i.id, i.created, i.title]))
+})
+
+// Fixtures below are trimmed from the vendors' published example responses
+// (PagerDuty REST API v2 OpenAPI spec, Opsgenie Alert API docs, Rootly API as used by Rootly's own on-call-health repo).
+
+const importJson = (o: unknown) => { const p = parseJson(JSON.stringify(o)); return { p, v: validate(p.csv, autoMap(p.csv.rows[0]), p.format) } }
+
+test('PagerDuty Analytics raw incidents: detected, names from acknowledged_user_names, ack from seconds', () => {
+  const { p, v } = importJson({ data: [
+    { acknowledged_user_names: ['John Smith'], assigned_user_names: ['John Smith', 'Jane Doe'], auto_resolved: false, created_at: '2023-05-31T10:05:00', description: 'The server is on fire!', id: 'PYC0H08', incident_number: 928, resolved_at: '2023-05-31T10:15:00', seconds_to_first_ack: 5, seconds_to_resolve: 3305, service_name: 'Engineering', urgency: 'low', priority_name: null },
+    { acknowledged_user_names: [], assigned_user_names: ['Sally Styles'], created_at: '2023-05-31T10:00:00', description: 'Reply on social media', id: 'PCOOHCY', incident_number: 929, resolved_at: '2023-05-30T10:00:05', seconds_to_first_ack: 48, service_name: 'Social media tracking', urgency: 'low', priority_name: 'SEV-2' },
+  ], time_zone: 'Etc/UTC', more: true })
+  assert.equal(p.format, 'pagerduty-analytics')
+  assert.deepEqual(v.incidents.map(i => i.person), ['John Smith', 'Sally Styles'])
+  assert.equal(v.incidents[0].acked, Date.parse('2023-05-31T10:05:05Z'))
+  // resolved_at wins over seconds_to_resolve; the published example's second record resolves before it starts.
+  assert.equal(v.incidents[0].resolved, Date.parse('2023-05-31T10:15:00Z'))
+  assert.equal(v.incidents[1].resolved, undefined)
+  assert.equal(v.issues.filter(i => i.level === 'warning').length, 1)
+})
+
+test('PagerDuty Analytics times are wall-clock in the requested time_zone', () => {
+  const { v } = importJson({ data: [{ id: 'P1', incident_number: 1, description: 'x', created_at: '2026-07-01T03:00:00', seconds_to_first_ack: 60 }], time_zone: 'America/New_York' })
+  assert.equal(v.incidents[0].created, Date.parse('2026-07-01T07:00:00Z'))
+  assert.equal(naiveToUtc('2026-01-15 03:00:00', NY), '2026-01-15T08:00:00.000Z')
+  assert.equal(naiveToUtc('2026-01-15T03:00:00Z', NY), '2026-01-15T03:00:00Z')
+})
+
+test('PagerDuty /incidents: a resolved incident with no assignments falls back to the resolving user', () => {
+  const { v } = importJson({ incidents: [{ id: 'PT4KHLK', incident_number: 1234, title: 'The server is on fire.', created_at: '2015-10-06T21:30:42Z', status: 'resolved', incident_key: 'baf7cf21b1da41b4b0221008339ff357', service: { id: 'PIJ90N7', type: 'service_reference', summary: 'My Mail Service' }, assignments: [], acknowledgements: [], last_status_change_at: '2015-10-06T21:38:23Z', resolved_at: '2015-10-06T21:38:23Z', last_status_change_by: { id: 'PXPGF42', type: 'user_reference', summary: 'Earline Greenholt' }, urgency: 'high' }], limit: 1, offset: 0, more: true })
+  assert.equal(v.incidents[0].person, 'Earline Greenholt')
+  assert.equal(v.incidents[0].service, 'My Mail Service')
+  assert.equal(v.incidents[0].key, 'baf7cf21b1da41b4b0221008339ff357')
+  // A service (integration) resolving it is not a person.
+  const svc = importJson({ incidents: [{ id: 'Q', title: 't', created_at: '2015-10-06T21:30:42Z', status: 'resolved', assignments: [], acknowledgements: [], last_status_change_by: { type: 'service_reference', summary: 'My Mail Service' } }] })
+  assert.equal(svc.v.incidents[0].person, 'Unassigned')
+})
+
+test('Opsgenie /v2/alerts: report.ackTime and closeTime are milliseconds, P4 is low urgency', () => {
+  const { p, v } = importJson({ data: [
+    { id: '70413a06-38d6-4c85-92b8-5ebc900d42e2', tinyId: '1791', alias: 'event_573', message: 'Our servers are in danger', status: 'closed', acknowledged: false, tags: ['OverwriteQuietHours', 'Critical'], count: 79, createdAt: '2017-03-21T20:32:52.353Z', source: 'Isengard', owner: 'neo@example.com', priority: 'P4', integration: { id: 'x', name: 'Nebuchadnezzar', type: 'API' }, report: { ackTime: 15702, closeTime: 60503, acknowledgedBy: 'neo@example.com', closedBy: 'neo@example.com' } },
+    { id: '8418d193-2dab-4490-b331-8c02cdd196b7', tinyId: '1792', alias: 'event_574', message: 'Sample Message', status: 'open', tags: ['RandomTag'], createdAt: '2017-03-21T20:32:52.353Z', source: 'Zion', owner: '', priority: 'P1', report: {} },
+  ], took: 0.605, requestId: '9ae63dd7-ed00-4c81-86f0-c4ffd33142c9' })
+  assert.equal(p.format, 'opsgenie-json')
+  const [a, b] = v.incidents
+  assert.equal(a.acked! - a.created, 15702)
+  assert.equal(a.resolved! - a.created, 60503)
+  assert.equal(a.person, 'neo@example.com')
+  assert.equal(a.urgency, 'low')
+  assert.equal(a.autoResolved, false)
+  assert.equal(a.key, 'event_573')
+  assert.equal(b.urgency, 'high')
+  assert.equal(b.acked, undefined)
+})
+
+test('Opsgenie CSV with spaced headers ("Tiny Id", "Ack Time") is detected and read in ms', () => {
+  const csv = parseCsv('"Tiny Id","Alias","Message","Created At","Priority","Ack Time","Close Time","Acknowledged By","Closed By"\n1791,event_573,Disk full,2017-03-21 20:32:52.353,P2,15702,60503,neo@example.com,Alert API\n')
+  const fmt = detectCsvFormat(csv.rows[0])
+  assert.equal(fmt, 'opsgenie-csv')
+  const v = validate(csv, autoMap(csv.rows[0]), fmt)
+  assert.equal(v.incidents[0].acked! - v.incidents[0].created, 15702)
+  assert.equal(v.incidents[0].autoResolved, true)
+})
+
+test('Rootly alerts JSON: noise marks non-actionable, summary is the title, alert_urgency name is read', () => {
+  const { p, v } = importJson({ data: [
+    { id: 'a1', type: 'alerts', attributes: { source: 'datadog', summary: 'High CPU on web-3', description: null, status: 'resolved', noise: 'noise', started_at: '2026-10-01T02:10:00Z', ended_at: '2026-10-01T02:12:00Z', alert_urgency: { name: 'Low' } } },
+    { id: 'a2', type: 'alerts', attributes: { source: 'datadog', summary: 'Checkout 5xx', description: 'Error rate above 5%', status: 'resolved', noise: 'not_noise', started_at: '2026-10-01T03:00:00Z', ended_at: '2026-10-01T03:40:00Z', alert_urgency: { name: 'High' } } },
+  ], meta: { total_count: 2 } })
+  assert.equal(p.format, 'rootly-json')
+  assert.deepEqual(v.incidents.map(i => [i.title, i.service, i.actionable, i.urgency]), [['High CPU on web-3', 'datadog', false, 'low'], ['Checkout 5xx', 'datadog', true, 'high']])
+  assert.equal(v.incidents[0].resolved! - v.incidents[0].created, 2 * M)
+})
+
+test('Rootly incident with a flat user object and nested severity', () => {
+  const { v } = importJson({ data: [{ id: 'inc1', type: 'incidents', attributes: { title: 'API latency', created_at: '2024-01-15T10:30:00Z', acknowledged_at: '2024-01-15T10:45:00Z', started_at: '2024-01-15T10:40:00Z', mitigated_at: '2024-01-15T11:00:00Z', status: 'resolved', severity: { data: { id: 'sev1', type: 'severities', attributes: { name: 'SEV1', slug: 'sev1' } } }, user: { id: 'user1', name: 'Test User', email: 'test@example.com' } } }] })
+  const i = v.incidents[0]
+  assert.equal(i.person, 'Test User')
+  assert.equal(i.urgency, 'high')
+  assert.equal(i.acked! - i.created, 15 * M)
+  assert.equal(i.resolved! - i.created, 30 * M)
 })

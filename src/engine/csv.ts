@@ -1,4 +1,5 @@
 import type { Incident } from './types.ts'
+import { tzOffset, validTz } from './analyze.ts'
 
 export function parseCsv(text: string): { rows: string[][]; lines: number[] } {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
@@ -89,13 +90,15 @@ export function toCsv(rows: (string | number)[][]): string {
 
 // ---------- Formats ----------
 
-export type Format = 'pagerduty-csv' | 'pagerduty-json' | 'pagerduty-log' | 'opsgenie-csv' | 'rootly-csv' | 'rootly-json' | 'generic-csv'
+export type Format = 'pagerduty-csv' | 'pagerduty-json' | 'pagerduty-log' | 'pagerduty-analytics' | 'opsgenie-csv' | 'opsgenie-json' | 'rootly-csv' | 'rootly-json' | 'generic-csv'
 
 export const FORMATS: Record<Format, string> = {
   'pagerduty-csv': 'PagerDuty incidents CSV',
   'pagerduty-json': 'PagerDuty REST API /incidents',
   'pagerduty-log': 'PagerDuty REST API /log_entries',
+  'pagerduty-analytics': 'PagerDuty Analytics raw incidents',
   'opsgenie-csv': 'Opsgenie alerts CSV',
+  'opsgenie-json': 'Opsgenie Alert API /v2/alerts',
   'rootly-csv': 'Rootly incidents CSV',
   'rootly-json': 'Rootly API (JSON:API)',
   'generic-csv': 'Generic CSV',
@@ -109,15 +112,15 @@ export const FIELDS: FieldSpec[] = [
   { key: 'created', label: 'Created / triggered at', required: true, type: 'time', aliases: ['created_at', 'created_on', 'createdat', 'started_at', 'triggered_at', 'start_time', 'timestamp', 'time', 'date'] },
   { key: 'title', label: 'Title', required: true, type: 'str', aliases: ['title', 'description', 'message', 'summary', 'alert', 'alert_name', 'name', 'incident_title'] },
   { key: 'service', label: 'Service', type: 'str', aliases: ['service_name', 'service', 'services', 'source', 'teams', 'team_name', 'entity'] },
-  { key: 'person', label: 'Paged person', type: 'str', aliases: ['acknowledged_by', 'acknowledgedby', 'acknowledged_by_user_names', 'assigned_to', 'assigned_to_user_names', 'assignee', 'owner', 'responder', 'responders', 'person', 'user', 'on_call', 'oncall', 'commander', 'incident_commander', 'creator'] },
-  { key: 'urgency', label: 'Urgency / severity / priority', type: 'str', aliases: ['urgency', 'priority', 'severity', 'sev'] },
+  { key: 'person', label: 'Paged person', type: 'str', aliases: ['acknowledged_by', 'acknowledgedby', 'acknowledged_by_user_names', 'acknowledged_user_names', 'assigned_to', 'assigned_to_user_names', 'assigned_user_names', 'assignee', 'owner', 'responder', 'responders', 'person', 'user', 'on_call', 'oncall', 'commander', 'incident_commander', 'creator'] },
+  { key: 'urgency', label: 'Urgency / severity / priority', type: 'str', aliases: ['urgency', 'priority', 'priority_name', 'severity', 'sev', 'alert_urgency'] },
   { key: 'acked', label: 'Acknowledged at', type: 'time', aliases: ['acknowledged_at', 'acked_at', 'ack_at', 'first_acknowledged_at'] },
   { key: 'resolved', label: 'Resolved / closed at', type: 'time', aliases: ['resolved_at', 'resolved_on', 'closed_at', 'ended_at', 'mitigated_at'] },
   { key: 'ackSecs', label: 'Seconds to first ack', type: 'dur', aliases: ['seconds_to_first_ack', 'time_to_ack', 'acktime', 'ack_time', 'tta'] },
   { key: 'resolveSecs', label: 'Seconds to resolve', type: 'dur', aliases: ['seconds_to_resolve', 'time_to_resolve', 'closetime', 'close_time', 'ttr'] },
   { key: 'autoResolved', label: 'Auto-resolved', type: 'bool', aliases: ['auto_resolved', 'autoresolved', 'resolved_by_integration'] },
   { key: 'closedBy', label: 'Resolved / closed by', type: 'str', aliases: ['closedby', 'closed_by', 'resolved_by'] },
-  { key: 'actionable', label: 'Actionable', type: 'bool', aliases: ['actionable', 'is_actionable'] },
+  { key: 'actionable', label: 'Actionable', type: 'bool', aliases: ['actionable', 'is_actionable', 'noise'] },
   { key: 'tags', label: 'Tags / labels', type: 'str', aliases: ['tags', 'labels', 'label'] },
   { key: 'key', label: 'Dedupe key / alias', type: 'str', aliases: ['alias', 'incident_key', 'dedup_key', 'dedupe_key', 'alert_key', 'fingerprint'] },
   { key: 'id', label: 'ID', type: 'str', aliases: ['id', 'incident_id', 'tinyid', 'incident_number', 'number', 'sequential_id', 'alert_id'] },
@@ -128,7 +131,7 @@ export const norm = (h: string) => h.trim().toLowerCase().replace(/^"|"$/g, '').
 /** Header signatures, most specific first. */
 export function detectCsvFormat(headers: string[]): Format {
   const h = new Set(headers.map(norm))
-  if (h.has('tinyid') || (h.has('alias') && h.has('message') && h.has('createdat'))) return 'opsgenie-csv'
+  if (h.has('tinyid') || h.has('tiny_id') || (h.has('alias') && h.has('message') && h.has('createdat'))) return 'opsgenie-csv'
   if (h.has('seconds_to_first_ack') || h.has('created_on') || h.has('escalation_policy_name') || (h.has('incident_number') && h.has('service_name'))) return 'pagerduty-csv'
   if (h.has('sequential_id') || h.has('mitigated_at') || (h.has('started_at') && h.has('severity') && h.has('services'))) return 'rootly-csv'
   return 'generic-csv'
@@ -153,8 +156,8 @@ export function autoMap(headers: string[]): Mapping {
 export interface Issue { line: number; level: 'error' | 'warning'; message: string }
 export interface Validated { incidents: Incident[]; issues: Issue[]; skipped: number; total: number }
 
-const TRUE = /^(true|yes|y|1|t)$/i
-const FALSE = /^(false|no|n|0|f)$/i
+const TRUE = /^(true|yes|y|1|t|not_noise)$/i
+const FALSE = /^(false|no|n|0|f|noise)$/i
 const NOISE_TAG = /\b(non[-_ ]?actionable|not[-_ ]?actionable|noise|noisy|false[-_ ]?positive)\b/i
 
 export function toUrgency(raw: string): 'high' | 'low' {
@@ -201,9 +204,9 @@ export function validate(csv: { rows: string[][]; lines: number[] }, map: Mappin
     seen.add(id)
     const inc: Incident = { id, title, service: firstOf(get(rec, 'service')) || 'Unknown service', person: firstOf(get(rec, 'person')) || personFallback(rec) || 'Unassigned', urgency: toUrgency(get(rec, 'urgency')), created }
     let acked = parseTime(get(rec, 'acked'))
-    if (Number.isNaN(acked) && get(rec, 'ackSecs')) { const d = durationMs(get(rec, 'ackSecs'), format === 'opsgenie-csv' ? 'ms' : 's'); if (!Number.isNaN(d) && d > 0) acked = created + d }
+    if (Number.isNaN(acked) && get(rec, 'ackSecs')) { const d = durationMs(get(rec, 'ackSecs'), format.startsWith('opsgenie') ? 'ms' : 's'); if (!Number.isNaN(d) && d > 0) acked = created + d }
     let resolved = parseTime(get(rec, 'resolved'))
-    if (Number.isNaN(resolved) && get(rec, 'resolveSecs')) { const d = durationMs(get(rec, 'resolveSecs'), format === 'opsgenie-csv' ? 'ms' : 's'); if (!Number.isNaN(d) && d >= 0) resolved = created + d }
+    if (Number.isNaN(resolved) && get(rec, 'resolveSecs')) { const d = durationMs(get(rec, 'resolveSecs'), format.startsWith('opsgenie') ? 'ms' : 's'); if (!Number.isNaN(d) && d >= 0) resolved = created + d }
     if (!Number.isNaN(acked)) { if (acked < created) issues.push({ line, level: 'warning', message: 'Acknowledged before it was created; ack time ignored' }); else inc.acked = acked }
     if (!Number.isNaN(resolved)) { if (resolved < created) issues.push({ line, level: 'warning', message: 'Resolved before it was created; resolve time ignored' }); else inc.resolved = resolved }
     const auto = get(rec, 'autoResolved')
@@ -268,23 +271,42 @@ export function parseJson(text: string): JsonParsed {
       return {
         id: str(i.id), title: str(i.title ?? i.summary), service_name: str(i.service), urgency: str(i.urgency), created_at: str(i.created_at),
         resolved_at: str(i.resolved_at) || (i.status === 'resolved' ? str(i.last_status_change_at) : ''),
-        acknowledged_at: str(acks[0]?.at), acknowledged_by: str(acks[0]?.acknowledger) || str(assigns[0]?.assignee),
+        acknowledged_at: str(acks[0]?.at), acknowledged_by: str(acks[0]?.acknowledger) || str(assigns[0]?.assignee) || resolver(i),
         incident_key: str(i.incident_key),
       }
     })
   } else {
-    format = 'rootly-json'
     const list = (Array.isArray(j) ? j : pick('data')) as Record<string, unknown>[]
+    const first = (list[0] ?? {}) as Record<string, unknown>
+    format = 'tinyId' in first ? 'opsgenie-json' : 'seconds_to_first_ack' in first || 'incident_number' in first ? 'pagerduty-analytics' : 'rootly-json'
     records = list.map(r => {
-      const a = (r.attributes ?? r) as Record<string, unknown>
+      // Opsgenie keeps ack and close times and who did them in a nested "report" object.
+      const a = { ...(r.attributes ?? r) as Record<string, unknown>, ...(r.report ?? {}) as Record<string, unknown> }
       const out: Record<string, string> = { id: str(r.id) }
       for (const [k, v] of Object.entries(a)) out[k] = str(v)
       if (!out.title && out.summary) out.title = out.summary
       return out
     })
   }
+  // PagerDuty Analytics writes times without an offset, in the time_zone the request asked for.
+  const zone = format === 'pagerduty-analytics' ? pages.map((p: Record<string, unknown>) => p?.time_zone).find((z: unknown) => typeof z === 'string' && validTz(z)) as string | undefined : undefined
+  if (zone) for (const rec of records) for (const k of ['created_at', 'resolved_at']) if (rec[k]) rec[k] = naiveToUtc(rec[k], zone)
   const headers = [...new Set(records.flatMap(Object.keys))]
   return { format, csv: { rows: [headers, ...records.map(r => headers.map(h => r[h] ?? ''))], lines: [0, ...records.map((_, i) => i + 1)] } }
+}
+
+/** "2023-05-31T10:05:00" read as wall-clock time in tz. Strings that carry an offset are left alone. */
+export function naiveToUtc(s: string, tz: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s.trim())) return s
+  const wall = parseTime(s)
+  const guess = wall - tzOffset(wall, tz)
+  return new Date(wall - tzOffset(guess, tz)).toISOString()
+}
+
+/** PagerDuty clears assignments and acknowledgements once an incident resolves; the user who resolved it is the best remaining guess. */
+function resolver(i: Record<string, unknown>): string {
+  const by = i.last_status_change_by as { type?: string } | undefined
+  return i.status === 'resolved' && by?.type?.startsWith('user') ? str(by) : ''
 }
 
 /** Enriches imported PagerDuty incidents with ack time, who was notified and whether an integration resolved it. */
