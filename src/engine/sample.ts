@@ -136,6 +136,8 @@ export const SAMPLES: SampleDef[] = [payments, search, platform]
 export function generate(def: SampleDef): Incident[] {
   const r = rng(def.seed)
   const between = (a: number, b: number) => a + r() * (b - a)
+  // Response and repair times are right-skewed in practice (most short, a long tail), so draw them log-uniformly.
+  const skewed = (a: number, b: number) => a * Math.pow(b / a, r())
   const out: Incident[] = []
   let n = 0
   const from = Date.parse(def.from + 'T00:00:00Z'), to = Date.parse(def.to + 'T00:00:00Z')
@@ -149,8 +151,8 @@ export function generate(def: SampleDef): Incident[] {
       inc.resolved = t + between(...(a.autoMin ?? [1, 4])) * MIN
       inc.autoResolved = true
     } else {
-      if (r() < (a.ackProb ?? 0.85)) inc.acked = t + between(0.5, sleepy ? 14 : 6) * MIN * (r() < 0.08 ? 4 : 1)
-      inc.resolved = (inc.acked ?? t) + between(...(a.ttrMin ?? [8, 45])) * MIN
+      if (r() < (a.ackProb ?? 0.85)) inc.acked = t + skewed(0.5, sleepy ? 14 : 6) * MIN * (r() < 0.08 ? 4 : 1)
+      inc.resolved = (inc.acked ?? t) + skewed(...(a.ttrMin ?? [8, 45])) * MIN
       inc.autoResolved = false
     }
     if (a.actionable === false) inc.actionable = false

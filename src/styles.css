@@ -200,6 +200,7 @@ input[type='range'] { padding: 0; border: 0; accent-color: var(--accent); backgr
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 .grid-2 > .panel, .grid-3 > .panel { margin-bottom: 0; }
+.grid-2 > *, .grid-3 > * { min-width: 0; }
 .boot { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 120px 20px; color: var(--ink-3); }
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
