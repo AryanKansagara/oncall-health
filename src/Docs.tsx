@@ -13,8 +13,18 @@ curl -s -H "Authorization: Token token=$PD_TOKEN" \\
   "https://api.pagerduty.com/log_entries?since=2026-07-01T00:00:00Z&until=2026-10-01T00:00:00Z&is_overview=false&limit=100&offset=0" \\
   > log_entries-0.json`
 
+const PD_ANALYTICS = `# Analytics raw incidents (has seconds_to_first_ack and acknowledger names; paginate with starting_after)
+curl -s -X POST -H "Authorization: Token token=$PD_TOKEN" \\
+  -H "Accept: application/vnd.pagerduty+json;version=2" -H "Content-Type: application/json" \\
+  -d '{"filters":{"created_at_start":"2026-07-01T00:00:00Z","created_at_end":"2026-10-01T00:00:00Z"},"limit":1000,"time_zone":"Etc/UTC"}' \\
+  https://api.pagerduty.com/analytics/raw/incidents > pd-analytics-1.json`
+
+const OG_API = `curl -s -H "Authorization: GenieKey $OPSGENIE_KEY" \\
+  "https://api.opsgenie.com/v2/alerts?query=createdAt%3E1751328000000&limit=100&offset=0&sort=createdAt&order=asc" \\
+  > opsgenie-alerts-0.json`
+
 const ROOTLY_API = `curl -s -H "Authorization: Bearer $ROOTLY_TOKEN" \\
-  "https://api.rootly.com/v1/incidents?filter[started_at][gte]=2026-07-01&filter[started_at][lt]=2026-10-01&page[size]=100&page[number]=1" \\
+  "https://api.rootly.com/v1/incidents?include=severity,user,started_by,resolved_by&filter[started_at][gte]=2026-07-01&filter[started_at][lt]=2026-10-01&page[size]=100&page[number]=1" \\
   > rootly-incidents-1.json
 
 # Alerts (pages) rather than declared incidents:
@@ -46,14 +56,18 @@ export default function Docs() {
       <h2 id="pagerduty-api">PagerDuty: REST API (/incidents and /log_entries)</h2>
       <p>Use a read-only API key (<strong>Integrations → API Access Keys</strong>). The API caps the window per request, so fetch a quarter in pages of 100 and drop all the JSON files in at once.</p>
       <Code label="shell" code={PD_API} />
-      <p>Import the <code>/incidents</code> files first. Then import the <code>/log_entries</code> files: they add who was actually notified (<code>notify_log_entry</code>), the first <code>acknowledge_log_entry</code>, and mark incidents whose <code>resolve_log_entry</code> came from an integration rather than a user as auto-resolved.</p>
+      <p>Import the <code>/incidents</code> files first. Then import the <code>/log_entries</code> files: they add who was actually notified (<code>notify_log_entry</code>), the first <code>acknowledge_log_entry</code>, and mark incidents whose <code>resolve_log_entry</code> came from an integration rather than a user as auto-resolved. PagerDuty clears assignments once an incident resolves, so without log entries a resolved incident is credited to the user who resolved it.</p>
+      <p>On plans with Analytics, the raw incidents endpoint is simpler: one file per 1,000 incidents, with acknowledger names and seconds to first ack already in it. Its timestamps have no offset; they are read in the <code>time_zone</code> the response reports.</p>
+      <Code label="shell" code={PD_ANALYTICS} />
 
       <h2 id="opsgenie">Opsgenie: alerts CSV</h2>
       <ol>
         <li>Open <strong>Alerts</strong>, switch the list to the quarter (search, e.g. <code>createdAt &gt; 01-07-2026</code>) and your team.</li>
         <li>Use <strong>Export → CSV</strong> on the alert list.</li>
       </ol>
-      <p>Columns used: <code>TinyId</code>, <code>Alias</code> (used as the dedupe key), <code>Message</code>, <code>CreatedAt</code>, <code>Priority</code> (P1 to P3 count as high urgency, P4 and P5 as low), <code>AcknowledgedBy</code> then <code>Owner</code>, <code>AckTime</code> and <code>CloseTime</code> (milliseconds after creation), <code>ClosedBy</code> (closed by an API, integration or policy means auto-resolved) and <code>Tags</code>. A tag like <code>non-actionable</code>, <code>noise</code> or <code>false-positive</code> marks the alert as non-actionable.</p>
+      <p>Columns used: <code>TinyId</code>, <code>Alias</code> (used as the dedupe key), <code>Message</code>, <code>CreatedAt</code>, <code>Priority</code> (P1 to P3 count as high urgency, P4 and P5 as low), <code>AcknowledgedBy</code> then <code>Owner</code>, <code>AckTime</code> and <code>CloseTime</code> (milliseconds after creation), <code>ClosedBy</code> (closed by an API, integration or policy means auto-resolved) and <code>Tags</code>. A tag like <code>non-actionable</code>, <code>noise</code> or <code>false-positive</code> marks the alert as non-actionable. Spaced headers (<code>Tiny Id</code>, <code>Ack Time</code>) work too.</p>
+      <p>Or use the Alert API: the <code>report</code> object of each alert carries the same ack and close times (milliseconds) and who did them.</p>
+      <Code label="shell" code={OG_API} />
 
       <h2 id="rootly">Rootly: incidents CSV or API</h2>
       <ol>
@@ -61,7 +75,8 @@ export default function Docs() {
         <li>Or use the API with a read-only key (JSON:API format):</li>
       </ol>
       <Code label="shell" code={ROOTLY_API} />
-      <p>Columns used: <code>started_at</code> (or <code>created_at</code>), <code>title</code>/<code>summary</code>, <code>services</code>, <code>severity</code> (SEV0 to SEV2 high, SEV3+ low), <code>acknowledged_at</code>, <code>resolved_at</code> (else <code>mitigated_at</code>) and the commander or creator as the person. Nested JSON:API objects are flattened to their names.</p>
+      <p>Columns used: <code>started_at</code> (or <code>created_at</code>), <code>title</code>/<code>summary</code>, <code>services</code>, <code>severity</code> (SEV0 to SEV2 high, SEV3+ low), <code>acknowledged_at</code>, <code>resolved_at</code> (else <code>mitigated_at</code>) and the commander or creator as the person. Nested JSON:API objects are flattened to their names. For <code>/v1/alerts</code>, <code>summary</code> is the title, <code>source</code> the service, <code>ended_at</code> the resolve time, and <code>noise: "noise"</code> marks the alert non-actionable.</p>
+      <p className="muted small">The importers are tested against the vendors&rsquo; published example responses, checked November 2026: the PagerDuty REST API v2 OpenAPI spec (<a href="https://github.com/PagerDuty/api-schema">github.com/PagerDuty/api-schema</a>: <code>/incidents</code>, <code>/log_entries</code>, <code>/analytics/raw/incidents</code>), the Opsgenie Alert API docs (<a href="https://docs.opsgenie.com/docs/alert-api">docs.opsgenie.com/docs/alert-api</a>) and the Rootly API objects used in Rootly&rsquo;s open-source <a href="https://github.com/Rootly-AI-Labs/on-call-health">on-call-health</a> repository (Apache-2.0).</p>
 
       <h2 id="generic">Generic CSV</h2>
       <p>Any CSV with at least a timestamp and a title. Timestamps may be ISO 8601 with or without an offset (no offset means UTC), epoch seconds or milliseconds, or <code>M/D/YYYY h:mm</code>.</p>

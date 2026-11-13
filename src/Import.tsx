@@ -81,7 +81,7 @@ export default function DataTab({ project, ds, cfg, update, setConfig }: { proje
         <div className="banner"><span><strong>Start here.</strong> Export a quarter of incidents or alerts from your paging tool (<Link href="/docs">exact steps</Link>), then drop the file below.</span></div>
       )}
       <div className="panel">
-        <div className="panel-head"><h2>Import</h2><span className="muted small">PagerDuty CSV or API JSON · Opsgenie CSV · Rootly CSV or API JSON · any CSV</span></div>
+        <div className="panel-head"><h2>Import</h2><span className="muted small">PagerDuty CSV, REST or Analytics JSON · Opsgenie CSV or API JSON · Rootly CSV or API JSON · any CSV</span></div>
         {project.sampleId && <p className="muted small">This is a synthetic sample, so its data is read-only. Importing here starts a new team. Want to rehearse? <button type="button" className="linkish" onClick={() => download(`${project.sampleId}-incidents.csv`, incidentsToCsv(ds))}>Download the sample as CSV</button> and drop it back in.</p>}
         <div className={`drop${drag ? ' over' : ''}`} role="button" tabIndex={0} aria-label="Choose CSV or JSON files to import"
           onClick={() => input.current?.click()} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.current?.click() } }}
@@ -195,19 +195,19 @@ function PendingFile({ p, hasData, onChange, onCancel, onCommit, onEnrich }: { p
       </div>
       <h3 className="small strong" style={{ marginTop: 8 }}>Validation</h3>
       <p className="small">
-        <strong className="good-text">{v!.incidents.length.toLocaleString()} pages ready</strong> of {v!.total.toLocaleString()} rows
+        <strong className="good-text">{v!.incidents.length.toLocaleString()} {v!.incidents.length === 1 ? 'page' : 'pages'} ready</strong> of {v!.total.toLocaleString()} rows
         {v!.skipped > 0 && <>, <strong className="error">{v!.skipped} skipped</strong></>}
-        {v!.issues.length > errors.length && <>, {v!.issues.length - errors.length} warnings</>}.
+        {v!.issues.length > errors.length && <>, {v!.issues.length - errors.length} {v!.issues.length - errors.length === 1 ? 'warning' : 'warnings'}</>}.
         {v!.incidents.length > 0 && <> People found: {new Set(v!.incidents.map(i => i.person)).size}. Range {new Date(v!.incidents.reduce((m, i) => Math.min(m, i.created), Infinity)).toISOString().slice(0, 10)} to {new Date(v!.incidents.reduce((m, i) => Math.max(m, i.created), 0)).toISOString().slice(0, 10)}.</>}
       </p>
       {v!.issues.length > 0 && (
         <div className="issues" role="log" aria-label="Validation issues">
-          {v!.issues.slice(0, 200).map((i, k) => <div key={k} className={i.level === 'error' ? 'error-row' : ''}><span className="ln">{p.format.endsWith('json') ? 'record' : 'line'} {i.line}</span><span>{i.message}</span></div>)}
+          {v!.issues.slice(0, 200).map((i, k) => <div key={k} className={i.level === 'error' ? 'error-row' : ''}><span className="ln">{/json|analytics/.test(p.format) ? 'record' : 'line'} {i.line}</span><span>{i.message}</span></div>)}
           {v!.issues.length > 200 && <div><span className="ln" /><span className="muted">and {v!.issues.length - 200} more</span></div>}
         </div>
       )}
       <div className="row gap" style={{ marginTop: 14 }}>
-        <button type="button" className="btn primary" disabled={!v!.incidents.length || busy} onClick={async () => { setBusy(true); await onCommit(p, v!.incidents, v!.skipped); setBusy(false) }}>Import {v!.incidents.length.toLocaleString()} pages</button>
+        <button type="button" className="btn primary" disabled={!v!.incidents.length || busy} onClick={async () => { setBusy(true); await onCommit(p, v!.incidents, v!.skipped); setBusy(false) }}>Import {v!.incidents.length.toLocaleString()} {v!.incidents.length === 1 ? 'page' : 'pages'}</button>
         <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
       </div>
     </div>

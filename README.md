@@ -10,7 +10,7 @@ Pages arrive through several tools at all hours, a lot of them are flapping, dup
 
 ## Features
 
-- **Import** PagerDuty incidents CSV and REST API (`/incidents` plus `/log_entries`), Opsgenie alerts CSV, Rootly CSV or JSON:API, or any CSV. Format detection, column mapping and a validation report with line numbers.
+- **Import** PagerDuty incidents CSV, REST API (`/incidents` plus `/log_entries`) and Analytics raw incidents, Opsgenie alerts CSV or Alert API JSON, Rootly CSV or JSON:API (incidents and alerts), or any CSV. Tested against the vendors' published example responses. Format detection, column mapping and a validation report with line numbers.
 - **Per-person load** in each person's timezone and working hours: business hours, evenings, sleep hours (default 22:00 to 07:00) and weekends, plus a 7 x 24 heatmap.
 - **Ack and resolve distributions**, **fairness** (Gini and share against a fair share) and a **documented burnout-risk score**.
 - **Noise detection**: auto-resolved blips, flapping, duplicates, dependencies, never-acked and non-actionable alerts, ranked with a concrete change and the pages per month it removes. Toggle any fix as a what-if.
