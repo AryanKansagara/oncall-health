@@ -28,6 +28,20 @@ npm test        # engine tests
 npm run build
 ```
 
+### Tests
+
+```sh
+npm test                           # engine unit tests (node:test)
+npx playwright install chromium    # once; add --with-deps on a bare Linux box
+npm run build && npm run test:e2e  # browser tests against the production build
+```
+
+`npm run test:e2e` starts `vite preview` itself on port 4173 and tests the `dist/` you just built, so build first. Use another port with `E2E_PORT=4400 npm run test:e2e`. It refuses to reuse a server that is already running. The suite runs signed out in Chromium, uses only the built-in sample teams and the synthetic files in `e2e/fixtures/`, and aborts every request that leaves the preview server (fonts, Supabase), so it needs no network or account. Any uncaught page error fails the test.
+
+GitHub Actions (`.github/workflows/ci.yml`, job `test`) runs install, build, unit tests and the E2E suite on every pull request and on pushes to `main`.
+
+`vercel.json` turns off preview deployments: only `main` is deployed, so pull requests are gated by CI rather than by a Vercel preview.
+
 Cloud sync needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env` (see `.env.example`). Without them the app runs in local-only mode.
 
 Built by Aryan Kansagara.
