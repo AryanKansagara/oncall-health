@@ -1,7 +1,8 @@
 import type { Incident } from './types.ts'
 import { tzOffset, validTz } from './analyze.ts'
 
-export function parseCsv(text: string): { rows: string[][]; lines: number[] } {
+/** `unterminated` is the line where a quoted field was opened and never closed (a file cut off inside quotes). */
+export function parseCsv(text: string): { rows: string[][]; lines: number[]; unterminated?: number } {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
   const delim = sniffDelimiter(text)
   const rows: string[][] = []
@@ -11,6 +12,7 @@ export function parseCsv(text: string): { rows: string[][]; lines: number[] } {
   let quoted = false
   let line = 1
   let rowLine = 1
+  let quoteLine = 0
   for (let i = 0; i < text.length; i++) {
     const c = text[i]
     if (quoted) {
@@ -22,7 +24,7 @@ export function parseCsv(text: string): { rows: string[][]; lines: number[] } {
       }
       continue
     }
-    if (c === '"' && field === '') quoted = true
+    if (c === '"' && field === '') { quoted = true; quoteLine = line }
     else if (c === delim) { row.push(field); field = '' }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++
@@ -37,7 +39,7 @@ export function parseCsv(text: string): { rows: string[][]; lines: number[] } {
     row.push(field)
     if (row.length > 1 || row[0] !== '') { rows.push(row); lines.push(rowLine) }
   }
-  return { rows, lines }
+  return quoted ? { rows, lines, unterminated: quoteLine } : { rows, lines }
 }
 
 function sniffDelimiter(text: string): string {
@@ -178,7 +180,7 @@ function durationMs(raw: string, field: string): number {
 const looksHuman = (s: string) => !!s && !/(api|system|integration|automation|auto[-_ ]?resolve|monitor|policy|rule|engine)/i.test(s)
 
 /** Typed incidents from parsed records plus a line-numbered report. Rows with fatal problems are skipped. */
-export function validate(csv: { rows: string[][]; lines: number[] }, map: Mapping, format: Format = 'generic-csv'): Validated {
+export function validate(csv: { rows: string[][]; lines: number[]; unterminated?: number }, map: Mapping, format: Format = 'generic-csv'): Validated {
   const issues: Issue[] = []
   for (const f of FIELDS) if (f.required && !(f.key in map)) issues.push({ line: 1, level: 'error', message: `Required column "${f.label}" is not mapped` })
   const total = Math.max(0, csv.rows.length - 1)
@@ -192,9 +194,14 @@ export function validate(csv: { rows: string[][]; lines: number[] }, map: Mappin
   const heads = (csv.rows[0] ?? []).map(norm)
   const personCols = FIELDS.find(f => f.key === 'person')!.aliases.map(a => heads.indexOf(a)).filter(i => i >= 0 && i !== map.person)
   const personFallback = (rec: string[]) => personCols.map(i => firstOf(rec[i] ?? '')).find(Boolean)
+  // A row with fewer fields than the header, missing a mapped column, reads that value as empty. On the last row that is what a cut-off file looks like.
+  const width = (csv.rows[0] ?? []).length
+  const mapped = Object.values(map)
+  if (csv.unterminated) issues.push({ line: csv.unterminated, level: 'warning', message: 'a quoted field is never closed; the file may be cut off' })
   for (let r = 1; r < csv.rows.length; r++) {
     const rec = csv.rows[r]
     const line = csv.lines[r]
+    if (rec.length < width && mapped.some(i => i >= rec.length)) issues.push({ line, level: 'warning', message: `row has ${rec.length} ${rec.length === 1 ? 'field' : 'fields'}, the header has ${width}; ${r === csv.rows.length - 1 ? 'the file may be cut off' : 'missing values are read as empty'}` })
     const created = parseTime(get(rec, 'created'))
     if (Number.isNaN(created)) { issues.push({ line, level: 'error', message: `Created time "${get(rec, 'created').slice(0, 40)}" is not a date/time` }); skipped++; continue }
     const title = get(rec, 'title')

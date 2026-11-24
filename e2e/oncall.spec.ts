@@ -326,17 +326,27 @@ test.describe('bad files', () => {
     await expect(page.locator('.panel-head', { hasText: 'Imported data' })).toContainText('8 pages')
   })
 
-  // KNOWN APP BUG, filed rather than fixed here (issue #2): a CSV cut off mid-row is read as if the row were complete.
-  // test.fail() keeps CI green while the bug exists and turns red as soon as it is fixed, so remove it then.
-  test('a CSV cut off mid-row is flagged', async ({ page }) => {
-    test.fail(true, 'App bug #2: a truncated final row imports without any warning.')
+  test('a CSV cut off mid-row is flagged with its line number', async ({ page }) => {
     expect(readFileSync(fixture('truncated.csv'), 'utf8').endsWith('\n')).toBe(false)
     await newTeam(page)
     await chooseFiles(page, 'truncated.csv')
-    await expect(page.getByText(/pages? ready of \d+ rows/)).toBeVisible()
-    // Either a warning or a skipped row is a fair way to say the last row is incomplete.
-    await expect(page.getByRole('log', { name: 'Validation issues' })).toBeVisible({ timeout: 2000 })
+    await expect(page.getByText('2 pages ready of 2 rows, 1 warning.')).toBeVisible()
+    const issues = page.getByRole('log', { name: 'Validation issues' })
+    await expect(issues).toContainText('line 3')
+    await expect(issues).toContainText('row has 6 fields, the header has 12; the file may be cut off')
+    // A warning, not a refusal: the complete row and the cut-off one are both still offered.
+    await expect(page.getByRole('button', { name: 'Import 2 pages' })).toBeEnabled()
   })
+
+  for (const file of ['no-final-newline.csv', 'trailing-columns-left-out.csv']) {
+    test(`${file} is a valid export and still imports`, async ({ page }) => {
+      await newTeam(page)
+      await chooseFiles(page, file)
+      await expect(page.getByText(/^2 pages ready of 2 rows/)).toBeVisible()
+      await page.getByRole('button', { name: 'Import 2 pages' }).click()
+      await expect(page.locator('.panel-head', { hasText: 'Imported data' })).toContainText('2 pages')
+    })
+  }
 })
 
 test.describe('persistence', () => {
