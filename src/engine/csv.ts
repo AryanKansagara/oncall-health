@@ -251,19 +251,40 @@ const str = (v: unknown): string => {
 export interface JsonParsed { format: Format; csv: { rows: string[][]; lines: number[] }; logEntries?: LogEntry[] }
 export interface LogEntry { type: string; at: number; incident: string; who: string; agentType: string }
 
-/** Flattens PagerDuty /incidents, /log_entries and Rootly JSON:API responses into header + rows so the same mapping and validation apply. "Line" is the record number. */
+/** Thrown by parseJson for JSON that is valid but is not shaped like a PagerDuty, Opsgenie or Rootly export. */
+export class NotAnExport extends Error {
+  constructor() { super('is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.') }
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const typeOf = (v: unknown): string => isObj(v) && typeof v.type === 'string' ? v.type : ''
+/** The records of an export. A list with nothing but numbers, strings, nulls or arrays in it is not one; a stray entry among real records is read as an empty record, which validation then reports by number. */
+const recordsOf = (list: unknown[]): Record<string, unknown>[] => {
+  if (list.length && !list.some(isObj)) throw new NotAnExport()
+  return list.map(x => isObj(x) ? x : {})
+}
+
+/** Flattens PagerDuty /incidents, /log_entries and Rootly JSON:API responses into header + rows so the same mapping and validation apply. "Line" is the record number. Throws NotAnExport for JSON of any other shape. */
 export function parseJson(text: string): JsonParsed {
   const j = JSON.parse(text)
-  const pages = Array.isArray(j) && j.length && typeof j[0] === 'object' && j[0] && ('incidents' in j[0] || 'log_entries' in j[0] || 'data' in j[0]) ? j : [j]
+  try { return flatten(j) } catch (e) {
+    // Last resort for shapes not thought of: refuse them in plain words instead of showing the JavaScript error.
+    if (e instanceof TypeError) throw new NotAnExport()
+    throw e
+  }
+}
+
+function flatten(j: any): JsonParsed {
+  const pages = (Array.isArray(j) && j.length && typeof j[0] === 'object' && j[0] && ('incidents' in j[0] || 'log_entries' in j[0] || 'data' in j[0]) ? j : [j]).filter((p: unknown) => typeof p === 'object' && p !== null) as Record<string, unknown>[]
   const pick = (k: string) => pages.flatMap((p: Record<string, unknown>) => Array.isArray(p) ? p : (p[k] as unknown[]) ?? [])
   if (pages.some((p: Record<string, unknown>) => p && 'log_entries' in p)) {
-    const entries = pick('log_entries') as Record<string, unknown>[]
+    const entries = recordsOf(pick('log_entries'))
     const logEntries = entries.map(e => ({
       type: String(e.type ?? '').replace(/_reference$/, ''),
       at: parseTime(String(e.created_at ?? '')),
       incident: str((e.incident as Record<string, unknown>)?.id),
-      who: str(e.user ?? (e.agent && (e.agent as { type?: string }).type?.startsWith('user') ? e.agent : '')),
-      agentType: String((e.agent as { type?: string })?.type ?? ''),
+      who: str(e.user ?? (typeOf(e.agent).startsWith('user') ? e.agent : '')),
+      agentType: typeOf(e.agent),
     })).filter(e => e.incident && !Number.isNaN(e.at))
     return { format: 'pagerduty-log', csv: { rows: [], lines: [] }, logEntries }
   }
@@ -271,7 +292,7 @@ export function parseJson(text: string): JsonParsed {
   let format: Format
   if (pages.some((p: Record<string, unknown>) => p && 'incidents' in p) || (Array.isArray(j) && j[0]?.incident_number !== undefined)) {
     format = 'pagerduty-json'
-    const list = (Array.isArray(j) && !('incidents' in (j[0] ?? {})) ? j : pick('incidents')) as Record<string, unknown>[]
+    const list = recordsOf(Array.isArray(j) && !('incidents' in (j[0] ?? {})) ? j : pick('incidents'))
     records = list.map(i => {
       const acks = (i.acknowledgements as { at?: string; acknowledger?: unknown }[] | undefined) ?? []
       const assigns = (i.assignments as { assignee?: unknown }[] | undefined) ?? []
@@ -283,12 +304,12 @@ export function parseJson(text: string): JsonParsed {
       }
     })
   } else {
-    const list = (Array.isArray(j) ? j : pick('data')) as Record<string, unknown>[]
-    const first = (list[0] ?? {}) as Record<string, unknown>
+    const list = recordsOf(Array.isArray(j) ? j : pick('data'))
+    const first = list[0] ?? {}
     format = 'tinyId' in first ? 'opsgenie-json' : 'seconds_to_first_ack' in first || 'incident_number' in first ? 'pagerduty-analytics' : 'rootly-json'
     records = list.map(r => {
       // Opsgenie keeps ack and close times and who did them in a nested "report" object.
-      const a = { ...(r.attributes ?? r) as Record<string, unknown>, ...(r.report ?? {}) as Record<string, unknown> }
+      const a = { ...(isObj(r.attributes) ? r.attributes : r), ...(isObj(r.report) ? r.report : {}) }
       const out: Record<string, string> = { id: str(r.id) }
       for (const [k, v] of Object.entries(a)) out[k] = str(v)
       if (!out.title && out.summary) out.title = out.summary
@@ -312,8 +333,8 @@ export function naiveToUtc(s: string, tz: string): string {
 
 /** PagerDuty clears assignments and acknowledgements once an incident resolves; the user who resolved it is the best remaining guess. */
 function resolver(i: Record<string, unknown>): string {
-  const by = i.last_status_change_by as { type?: string } | undefined
-  return i.status === 'resolved' && by?.type?.startsWith('user') ? str(by) : ''
+  const by = i.last_status_change_by
+  return i.status === 'resolved' && typeOf(by).startsWith('user') ? str(by) : ''
 }
 
 /** Enriches imported PagerDuty incidents with ack time, who was notified and whether an integration resolved it. */

@@ -289,6 +289,11 @@ test.describe('bad files', () => {
     ['header-only.csv', 'header-only.csv has no data rows.'],
     ['wrong-shape.json', 'wrong-shape.json has no incidents in it.'],
     ['truncated.json', /^truncated\.json: .*JSON/],
+    ['not-export-numbers.json', 'not-export-numbers.json is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.'],
+    ['not-export-data-number.json', 'not-export-data-number.json is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.'],
+    ['not-export-data-string.json', 'not-export-data-string.json is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.'],
+    ['not-export-null-array.json', 'not-export-null-array.json is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.'],
+    ['not-export-incidents-null.json', 'not-export-incidents-null.json is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.'],
   ] as const) {
     test(`${file} is refused with a message`, async ({ page }) => {
       await newTeam(page)
