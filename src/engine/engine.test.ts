@@ -280,6 +280,54 @@ test('missing required column is a single line-1 error', () => {
   assert.equal(v.issues[0].line, 1)
 })
 
+const PD_HEAD = 'id,incident_number,description,urgency,service_name,created_on,resolved_on,acknowledged_by,assigned_to,seconds_to_first_ack,seconds_to_resolve,auto_resolved'
+const PD_ROW1 = 'PD001,1,Disk full on db-1,high,Database,2026-10-05T03:10:00Z,2026-10-05T03:40:00Z,Ann Lee,Ann Lee,120,1800,false'
+const checkPd = (text: string) => { const csv = parseCsv(text); return validate(csv, autoMap(csv.rows[0]), 'pagerduty-csv') }
+
+test('a CSV cut off mid-row is flagged with its line number but its complete rows still import', () => {
+  const v = checkPd(`${PD_HEAD}\n${PD_ROW1}\nPD002,2,Disk full on db-1,high,Database,2026-10-06T03:20:00Z`)
+  assert.deepEqual(v.issues, [{ line: 3, level: 'warning', message: 'row has 6 fields, the header has 12; the file may be cut off' }])
+  assert.equal(v.incidents.length, 2)
+  assert.equal(v.skipped, 0)
+  const one = checkPd(`${PD_HEAD}\n${PD_ROW1}\nPD002`)
+  assert.equal(one.issues[0].message, 'row has 1 field, the header has 12; the file may be cut off')
+  // Cut inside the created time: the existing error still applies, with the cut-off warning beside it.
+  const mid = checkPd(`${PD_HEAD}\n${PD_ROW1}\nPD002,2,Disk full on db-1,high,Database,2026-10-06T0`)
+  assert.deepEqual(mid.issues.map(i => [i.line, i.level]), [[3, 'warning'], [3, 'error']])
+  assert.equal(mid.skipped, 1)
+})
+
+test('valid exports with no final newline, CRLF, or trailing values left out still import', () => {
+  const rows = [PD_ROW1, 'PD002,2,CPU high,high,API,2026-10-06T03:20:00Z,2026-10-06T03:50:00Z,Bob Ng,Bob Ng,60,1800,false']
+  for (const text of [`${PD_HEAD}\n${rows.join('\n')}`, `${PD_HEAD}\r\n${rows.join('\r\n')}\r\n`, `${PD_HEAD}\n${rows.join('\n')}\n\n`]) {
+    const v = checkPd(text)
+    assert.deepEqual(v.issues, [])
+    assert.equal(v.incidents.length, 2)
+  }
+  // The last row stops before columns the import does not use (here: not mapped): nothing is lost, so nothing is said.
+  const csv = parseCsv(`${PD_HEAD},notes\n${rows[0]},,x\n${rows[1]}`)
+  const map = autoMap(csv.rows[0])
+  const v = validate(csv, map, 'pagerduty-csv')
+  assert.deepEqual(v.issues, [])
+  assert.equal(v.incidents.length, 2)
+  // A short last row that only lacks empty optional values still imports with the same values, plus a warning.
+  const trimmed = checkPd(`${PD_HEAD}\n${PD_ROW1}\nPD002,2,CPU high,high,API,2026-10-06T03:20:00Z`)
+  assert.equal(trimmed.incidents.length, 2)
+  assert.equal(trimmed.incidents[1].title, 'CPU high')
+  assert.equal(trimmed.incidents[1].person, 'Unassigned')
+})
+
+test('a short row in the middle is reported as read with empty values, and a quote never closed is reported', () => {
+  const v = checkPd(`${PD_HEAD}\n${PD_ROW1}\nPD002,2,CPU high,high,API,2026-10-06T03:20:00Z\nPD003,3,CPU high,high,API,2026-10-07T03:20:00Z,2026-10-07T03:50:00Z,Bob Ng,Bob Ng,60,1800,false\n`)
+  assert.deepEqual(v.issues, [{ line: 3, level: 'warning', message: 'row has 6 fields, the header has 12; missing values are read as empty' }])
+  assert.equal(v.incidents.length, 3)
+  const text = `${PD_HEAD}\n${PD_ROW1}\nPD002,2,"CPU high,high,API,2026-10-06T03:20:00Z`
+  assert.equal(parseCsv(text).unterminated, 3)
+  assert.equal(parseCsv(`${PD_HEAD}\n${PD_ROW1}\n`).unterminated, undefined)
+  const q = checkPd(text)
+  assert.ok(q.issues.some(i => i.line === 3 && i.level === 'warning' && /never closed.*cut off/.test(i.message)))
+})
+
 test('PagerDuty REST /incidents and /log_entries', () => {
   const p = parseJson(JSON.stringify({ incidents: [{ id: 'Q1', title: 'Disk', urgency: 'high', status: 'resolved', created_at: '2026-10-01T03:00:00Z', last_status_change_at: '2026-10-01T03:03:00Z', service: { summary: 'db' }, assignments: [{ assignee: { summary: 'Ann' } }], acknowledgements: [] }] }))
   assert.equal(p.format, 'pagerduty-json')
