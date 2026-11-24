@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { alertKey, analyze, applyFixes, bucketOf, burnoutScore, compensation, detectFixes, escalationRate, gini, histogram, isoWeek, local, longestRun, nightOf, normalizeTitle, percentile, periods, simulateRota, slicePeriod, snapshot } from './analyze.ts'
-import { applyLogEntries, autoMap, detectCsvFormat, incidentsToCsv, mergeIncidents, naiveToUtc, parseCsv, parseJson, parseTime, toUrgency, validate } from './csv.ts'
+import { applyLogEntries, autoMap, detectCsvFormat, incidentsToCsv, mergeIncidents, naiveToUtc, NotAnExport, parseCsv, parseJson, parseTime, toUrgency, validate } from './csv.ts'
 import { DEFAULT_POLICY, generate, SAMPLES, sampleConfig } from './sample.ts'
 import type { Config, Incident } from './types.ts'
 
@@ -396,4 +396,29 @@ test('Rootly incident with a flat user object and nested severity', () => {
   assert.equal(i.urgency, 'high')
   assert.equal(i.acked! - i.created, 15 * M)
   assert.equal(i.resolved! - i.created, 30 * M)
+})
+
+test('JSON that is not an incident export is refused in plain words, never with a JavaScript error', () => {
+  for (const text of ['[1,2,3]', '{"data":[1]}', '{"data":"x"}', '[null]', '{"incidents":[null]}', '{"incidents":"x"}', '{"log_entries":[null]}', '[[1]]', '["x"]', '[true]', '{"data":5}']) {
+    assert.throws(() => parseJson(text), (e: unknown) => e instanceof NotAnExport && e.message === 'is JSON but not an incident export from PagerDuty, Opsgenie or Rootly. See the export guides.', text)
+  }
+  // Odd values inside records of a real export do not raise TypeErrors either.
+  assert.doesNotThrow(() => parseJson('{"incidents":[{"id":"Q1","title":"t","created_at":"2026-10-01T03:00:00Z","status":"resolved","last_status_change_by":{"type":5},"acknowledgements":5,"assignments":[null]}]}'))
+  assert.doesNotThrow(() => parseJson('{"log_entries":[{"agent":{"type":5},"incident":{"id":"Q1"},"created_at":"2026-10-01T03:00:00Z"}]}'))
+})
+
+test('JSON that is empty, or malformed JSON, keeps its existing behaviour', () => {
+  for (const text of ['[]', '{}', '{"foo":1}', '{"incidents":[]}', '{"data":[]}']) assert.equal(parseJson(text).csv.rows.length < 2, true, text)
+  assert.throws(() => parseJson('{"incidents":[{"id":"PT4KHLK","title":"The server is on fi'), SyntaxError)
+})
+
+test('a stray entry among real JSON records is reported by record number, the real ones still import', () => {
+  const rec = { id: '1', attributes: { title: 'DB down', started_at: '2026-10-01T03:00:00Z' } }
+  for (const stray of [null, 7, 'x', []]) {
+    const p = parseJson(JSON.stringify({ data: [rec, stray, { ...rec, id: '3' }] }))
+    const v = validate(p.csv, autoMap(p.csv.rows[0]), p.format)
+    assert.equal(v.incidents.length, 2)
+    assert.equal(v.skipped, 1)
+    assert.equal(v.issues.find(i => i.level === 'error')?.line, 2)
+  }
 })

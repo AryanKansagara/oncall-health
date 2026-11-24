@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { validTz } from './engine/analyze.ts'
-import { applyLogEntries, autoMap, detectCsvFormat, FIELDS, FORMATS, incidentsToCsv, mergeIncidents, parseCsv, parseJson, validate, type Format, type LogEntry, type Mapping } from './engine/csv.ts'
+import { applyLogEntries, autoMap, detectCsvFormat, FIELDS, FORMATS, incidentsToCsv, mergeIncidents, NotAnExport, parseCsv, parseJson, validate, type Format, type LogEntry, type Mapping } from './engine/csv.ts'
 import type { Config, Incident, PersonCfg } from './engine/types.ts'
 import { createBlankProject, withPeople } from './projectData.ts'
 import { putData, saveProject, uuid, type Project } from './store.ts'
@@ -39,7 +39,7 @@ export default function DataTab({ project, ds, cfg, update, setConfig }: { proje
           if (csv.rows.length < 2) { toast(`${f.name} has no data rows.`, { tone: 'error' }); continue }
           next.push({ id: uuid(), name: f.name, format: detectCsvFormat(csv.rows[0]), csv, map: autoMap(csv.rows[0]) })
         }
-      } catch (e) { toast(`${f.name}: ${e instanceof Error ? e.message : 'could not be read'}`, { tone: 'error' }) }
+      } catch (e) { toast(e instanceof NotAnExport ? `${f.name} ${e.message}` : `${f.name}: ${e instanceof Error ? e.message : 'could not be read'}`, { tone: 'error' }) }
     }
     setPending(p => [...p, ...next])
     setBusy(false)
