@@ -1,0 +1,33 @@
+{
+  "incidents": [
+    {
+      "id": "PT4KHLK",
+      "incident_number": 1234,
+      "title": "The server is on fire.",
+      "created_at": "2026-10-06T21:30:42Z",
+      "status": "resolved",
+      "incident_key": "baf7cf21b1da41b4b0221008339ff357",
+      "service": { "id": "PIJ90N7", "type": "service_reference", "summary": "My Mail Service" },
+      "assignments": [],
+      "acknowledgements": [],
+      "last_status_change_at": "2026-10-06T21:38:23Z",
+      "resolved_at": "2026-10-06T21:38:23Z",
+      "last_status_change_by": { "id": "PXPGF42", "type": "user_reference", "summary": "Earline Greenholt" },
+      "urgency": "high"
+    },
+    {
+      "id": "PT4KHLL",
+      "incident_number": 1235,
+      "title": "Queue is backing up",
+      "created_at": "2026-10-07T04:10:00Z",
+      "status": "triggered",
+      "service": { "id": "PIJ90N7", "type": "service_reference", "summary": "My Mail Service" },
+      "assignments": [{ "assignee": { "id": "PXPGF43", "type": "user_reference", "summary": "Dana Rivers" } }],
+      "acknowledgements": [],
+      "urgency": "high"
+    }
+  ],
+  "limit": 25,
+  "offset": 0,
+  "more": false
+}
